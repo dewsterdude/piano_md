@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Piano MD</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1a1a1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Piano MD">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; touch-action: manipulation; }
+
+  body {
+    background: #1a1a1a;
+    font-family: 'Georgia', serif;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── HEADER ── */
+  #header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: linear-gradient(180deg, #2a2a2a, #1e1e1e);
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+    gap: 12px;
+  }
+
+  #title {
+    color: #c8a96e;
+    font-size: 16px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* Sound toggle */
+  #sound-toggle {
+    display: flex;
+    background: #111;
+    border-radius: 20px;
+    padding: 3px;
+    gap: 2px;
+    border: 1px solid #444;
+  }
+
+  .sound-btn {
+    padding: 5px 14px;
+    border-radius: 16px;
+    border: none;
+    font-size: 12px;
+    font-family: 'Georgia', serif;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: transparent;
+    color: #888;
+    white-space: nowrap;
+  }
+
+  .sound-btn.active {
+    background: linear-gradient(135deg, #c8a96e, #a07840);
+    color: #1a1a1a;
+    font-weight: bold;
+  }
+
+  .sound-btn.loading {
+    color: #c8a96e;
+    opacity: 0.7;
+  }
+
+  /* GRAND button stacks its label + sample credit */
+  #btn-grand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.1;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .credit {
+    font-size: 7px;
+    letter-spacing: 0.5px;
+    text-transform: none;
+    opacity: 0.65;
+    margin-top: 1px;
+  }
+
+  /* Octave shifter */
+  #octave-shifter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #111;
+    border: 1px solid #444;
+    border-radius: 20px;
+    padding: 3px 6px;
+  }
+
+  .shift-btn {
+    width: 32px;
+    height: 28px;
+    border-radius: 14px;
+    border: none;
+    background: #2a2a2a;
+    color: #c8a96e;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .shift-btn:active {
+    background: linear-gradient(135deg, #c8a96e, #a07840);
+    color: #1a1a1a;
+    transform: scale(0.92);
+  }
+
+  .shift-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  #octave-display {
+    color: #c8a96e;
+    font-size: 13px;
+    letter-spacing: 1px;
+    min-width: 28px;
+    text-align: center;
+    font-weight: bold;
+  }
+
+  #octave-label {
+    color: #555;
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-align: center;
+    margin-top: -2px;
+  }
+
+  /* ── KEYBOARD WRAPPER ── */
+  #keyboard-wrapper {
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    position: relative;
+    background: #111;
+  }
+
+  #keyboard-wrapper::-webkit-scrollbar { display: none; }
+
+  /* ── KEYBOARD ── */
+  #keyboard {
+    position: relative;
+    height: 100%;
+    /* Width computed by JS */
+  }
+
+  /* ── WHITE KEYS ── */
+  .white-key {
+    position: absolute;
+    bottom: 0;
+    background: linear-gradient(180deg, #f5f0e8 0%, #fffdf8 60%, #f0ebe0 100%);
+    border: 1px solid #bbb;
+    border-top: 2px solid #ddd;
+    border-radius: 0 0 6px 6px;
+    cursor: pointer;
+    transition: background 0.05s;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.3), inset -1px 0 2px rgba(255,255,255,0.5);
+  }
+
+  .white-key.pressed {
+    background: linear-gradient(180deg, #e8dfc8 0%, #f5edda 60%, #ddd0b8 100%);
+    box-shadow: 1px 0 2px rgba(0,0,0,0.3), inset 0 4px 8px rgba(0,0,0,0.15);
+    transform: translateY(2px);
+  }
+
+  /* ── BLACK KEYS ── */
+  .black-key {
+    position: absolute;
+    z-index: 2;
+    background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 70%, #333 100%);
+    border-radius: 0 0 4px 4px;
+    cursor: pointer;
+    transition: background 0.05s;
+    box-shadow: 2px 4px 8px rgba(0,0,0,0.7), inset 1px 0 2px rgba(255,255,255,0.05);
+    border: 1px solid #111;
+    border-top: none;
+  }
+
+  .black-key.pressed {
+    background: linear-gradient(180deg, #3a3a3a 0%, #2a2020 70%, #444 100%);
+    box-shadow: 1px 2px 4px rgba(0,0,0,0.7), inset 0 4px 8px rgba(0,0,0,0.4);
+    transform: translateY(2px);
+  }
+
+  /* ── NOTE LABEL ── */
+  .key-label {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    color: #999;
+    letter-spacing: 0.5px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .black-key .key-label { color: #666; bottom: 5px; font-size: 8px; }
+
+  /* ── SCROLL HINT ── */
+  #scroll-hint {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.7);
+    color: #c8a96e;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 1s;
+    z-index: 10;
+  }
+
+  #scroll-hint.hidden { opacity: 0; }
+
+  /* ── VOLUME ── */
+  #vol-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #vol-wrap label { color: #666; font-size: 10px; letter-spacing: 1px; }
+
+  #volume {
+    -webkit-appearance: none;
+    width: 60px;
+    height: 4px;
+    border-radius: 2px;
+    background: #444;
+    outline: none;
+  }
+
+  #volume::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #c8a96e;
+    cursor: pointer;
+  }
+
+  /* landscape hint */
+  #rotate-msg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: #1a1a1a;
+    color: #c8a96e;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 16px;
+    font-size: 18px;
+    letter-spacing: 2px;
+    z-index: 100;
+  }
+
+  #rotate-msg svg { opacity: 0.6; }
+
+  @media (orientation: portrait) and (max-width: 600px) {
+    #rotate-msg { display: flex; }
+  }
+</style>
+</head>
+<body>
+
+<div id="rotate-msg">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#c8a96e" stroke-width="1.5">
+    <rect x="4" y="2" width="16" height="20" rx="2"/>
+    <path d="M12 18h.01"/>
+    <path d="M2 12h4M6 8l-4 4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <span>ROTATE FOR PIANO</span>
+</div>
+
+<div id="header">
+  <div id="title">🎹 Piano MD</div>
+  <div id="sound-toggle">
+    <button class="sound-btn active" id="btn-grand" onclick="setSound('grand')"><span id="grand-label">GRAND</span><span class="credit">by Salamander</span></button>
+    <button class="sound-btn" id="btn-piano" onclick="setSound('piano')">SYNTH</button>
+  </div>
+  <div id="vol-wrap">
+    <label>VOL</label>
+    <input type="range" id="volume" min="0" max="1" step="0.05" value="0.7">
+  </div>
+  <div id="octave-shifter">
+    <button class="shift-btn" id="btn-left" onclick="shiftOctave(-1)">◀</button>
+    <div style="display:flex;flex-direction:column;align-items:center;">
+      <div id="octave-display">C4</div>
+      <div id="octave-label">CENTER</div>
+    </div>
+    <button class="shift-btn" id="btn-right" onclick="shiftOctave(1)">▶</button>
+  </div>
+</div>
+
+<div id="keyboard-wrapper">
+  <div id="keyboard"></div>
+</div>
+
+<div id="scroll-hint">← SCROLL TO EXPLORE ALL 88 KEYS →</div>
+
+<!-- Tone.js (vendored for offline use) — powers the sampled GRAND piano -->
+<script src="vendor/tone.js"></script>
+<script>
+// ── AUDIO CONTEXT ── (synth voices use raw Web Audio; GRAND uses Tone.js)
+let ctx = null;
+function getCtx() {
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+
+let currentSound = 'grand';
+let masterVolume = 0.7;
+const activeNotes = {};
+
+// ── NOTE MATH ──
+// A4 = MIDI 69 = 440Hz
+// Piano: MIDI 21 (A0) to MIDI 108 (C8)
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+// ── REVERB (shared, built once) ──
+let reverbNode = null;
+function getReverbNode() {
+  if (reverbNode) return reverbNode;
+  const ac = getCtx();
+  const conv = ac.createConvolver();
+  const rate = ac.sampleRate;
+  const len  = Math.floor(rate * 1.8);
+  const ir   = ac.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      const t = i / rate;
+      const early = i < rate * 0.03 ? (Math.random() * 2 - 1) * Math.exp(-i / (rate * 0.008)) * 0.6 : 0;
+      const tail  = (Math.random() * 2 - 1) * Math.exp(-t / 0.6) * 0.4;
+      d[i] = early + tail;
+    }
+  }
+  conv.buffer = ir;
+  const wet = ac.createGain();
+  wet.gain.value = 0.18;
+  conv.connect(wet);
+  wet.connect(ac.destination);
+  reverbNode = conv;
+  return reverbNode;
+}
+
+// ── PIANO SYNTH ── (additive harmonics + inharmonicity + hammer noise + reverb)
+function playPiano(midi) {
+  const ac   = getCtx();
+  const freq = midiToFreq(midi);
+  const vol  = masterVolume;
+  const now  = ac.currentTime;
+
+  // 0=low A0, 1=high C8
+  const pos = (midi - 21) / 87;
+
+  // Decay: bass ~5s, treble ~1.2s
+  const decay = 1.2 + (1 - pos) * 3.8;
+  const attackTime = 0.003 + pos * 0.003;
+
+  // Piano inharmonicity — strings get stiffer toward treble
+  const B = 0.00015 + pos * pos * 0.003;
+  function stretchedPartial(n) {
+    return freq * n * Math.sqrt(1 + B * n * n);
+  }
+
+  // Partial amplitudes — treble is richer in upper harmonics
+  const partials = [
+    { n:1, amp: 1.00 },
+    { n:2, amp: 0.50 + pos * 0.20 },
+    { n:3, amp: 0.25 + pos * 0.15 },
+    { n:4, amp: 0.12 + pos * 0.12 },
+    { n:5, amp: 0.06 + pos * 0.08 },
+    { n:6, amp: 0.03 + pos * 0.05 },
+    { n:7, amp: 0.02 + pos * 0.03 },
+    { n:8, amp: 0.01 + pos * 0.02 },
+  ];
+
+  const masterGain = ac.createGain();
+  masterGain.gain.value = 1;
+
+  // Tone shaping: warm bass, bright treble
+  const toneFilter = ac.createBiquadFilter();
+  toneFilter.type = 'lowpass';
+  toneFilter.frequency.value = 900 + pos * 13000;
+  toneFilter.Q.value = 0.4;
+
+  masterGain.connect(toneFilter);
+  toneFilter.connect(ac.destination);
+  toneFilter.connect(getReverbNode());
+
+  const oscs = [];
+
+  partials.forEach(({ n, amp }) => {
+    const pFreq = stretchedPartial(n);
+    if (pFreq > ac.sampleRate / 2.2) return;
+
+    const osc   = ac.createOscillator();
+    const pGain = ac.createGain();
+    osc.type = n === 1 ? 'triangle' : 'sine';
+    osc.frequency.value = pFreq;
+
+    // Chorus: two strings per note, slightly detuned
+    if (n <= 4) {
+      const osc2  = ac.createOscillator();
+      const g2    = ac.createGain();
+      osc2.type   = 'sine';
+      osc2.frequency.value = pFreq * (1 + 0.0003 + pos * 0.0002);
+      g2.gain.value = amp * 0.38;
+      const partialDecay2 = decay / (1 + (n - 1) * (0.3 + pos * 0.4));
+      g2.gain.setValueAtTime(amp * 0.38, now);
+      g2.gain.exponentialRampToValueAtTime(0.0001, now + partialDecay2);
+      osc2.connect(g2);
+      g2.connect(masterGain);
+      osc2.start(now);
+      osc2.stop(now + partialDecay2 + 0.1);
+      oscs.push(osc2);
+    }
+
+    // Higher partials decay faster
+    const partialDecay = decay / (1 + (n - 1) * (0.3 + pos * 0.4));
+
+    pGain.gain.setValueAtTime(0, now);
+    pGain.gain.linearRampToValueAtTime(amp * vol * 0.55, now + attackTime);
+    pGain.gain.exponentialRampToValueAtTime(amp * vol * 0.20, now + 0.12);
+    pGain.gain.exponentialRampToValueAtTime(0.0001, now + partialDecay);
+
+    osc.connect(pGain);
+    pGain.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + partialDecay + 0.1);
+    oscs.push(osc);
+  });
+
+  // Hammer impact noise — short bandpass-filtered burst
+  const bufLen = Math.floor(ac.sampleRate * 0.045);
+  const noiseBuf = ac.createBuffer(1, bufLen, ac.sampleRate);
+  const nd = noiseBuf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) nd[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufLen * 0.12));
+  const noise     = ac.createBufferSource();
+  noise.buffer    = noiseBuf;
+  const noiseF    = ac.createBiquadFilter();
+  noiseF.type     = 'bandpass';
+  noiseF.frequency.value = 700 + pos * 2500;
+  noiseF.Q.value  = 1.2;
+  const noiseGain = ac.createGain();
+  noiseGain.gain.setValueAtTime(vol * (0.09 - pos * 0.055), now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+  noise.connect(noiseF);
+  noiseF.connect(noiseGain);
+  noiseGain.connect(ac.destination);
+  noise.start(now);
+
+  return { gain: masterGain, decay, oscs };
+}
+
+// ── GRAND PIANO ── (real sampled sound: Salamander Grand Piano via Tone.js Sampler)
+// Samples: Alexander Holm's Salamander Grand Piano (CC-BY 3.0), minor-third intervals A0..C8.
+const GRAND_NOTES = ['A0','C1','Ds1','Fs1','A1','C2','Ds2','Fs2','A2','C3','Ds3','Fs3','A3','C4','Ds4','Fs4','A4','C5','Ds5','Fs5','A5','C6','Ds6','Fs6','A6','C7','Ds7','Fs7','A7','C8'];
+let grandSampler = null;
+let grandGain = null;
+let grandLoaded = false;
+let grandLoading = false;
+
+function fileToNote(f) {
+  // 'Ds4' -> 'D#4', 'A0' -> 'A0'
+  return f.replace('s', '#');
+}
+
+function ensureGrand() {
+  if (grandLoaded || grandLoading || typeof Tone === 'undefined') return;
+  grandLoading = true;
+  const btn = document.getElementById('btn-grand');
+  const label = document.getElementById('grand-label');
+  btn.classList.add('loading');
+  label.textContent = 'LOADING';
+
+  grandGain = new Tone.Gain(masterVolume).toDestination();
+
+  const urls = {};
+  GRAND_NOTES.forEach(f => { urls[fileToNote(f)] = f + '.mp3'; });
+
+  grandSampler = new Tone.Sampler({
+    urls,
+    baseUrl: 'samples/salamander/',
+    release: 1,
+    onload: () => {
+      grandLoaded = true;
+      grandLoading = false;
+      btn.classList.remove('loading');
+      label.textContent = 'GRAND';
+    }
+  }).connect(grandGain);
+}
+
+function midiToToneNote(midi) {
+  return NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1);
+}
+
+function playNote(midi) {
+  if (currentSound === 'grand' && grandLoaded) {
+    grandSampler.triggerAttack(midiToToneNote(midi));
+    return;
+  }
+  // SYNTH voice — also used as fallback while GRAND samples are still loading
+  stopNote(midi);
+  activeNotes[midi] = playPiano(midi);
+}
+
+function stopNote(midi) {
+  if (currentSound === 'grand' && grandLoaded) {
+    grandSampler.triggerRelease(midiToToneNote(midi));
+    return;
+  }
+  if (activeNotes[midi]) {
+    const { gain, oscs } = activeNotes[midi];
+    const ac = getCtx();
+    const now = ac.currentTime;
+    try {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+    } catch(e) {}
+    delete activeNotes[midi];
+  }
+}
+
+// ── KEYBOARD LAYOUT ──
+// White key pattern within an octave (0-indexed from C): C D E F G A B
+// Black keys: C# D# F# G# A#
+const WHITE_IN_OCTAVE = [0, 2, 4, 5, 7, 9, 11]; // semitone offsets
+const BLACK_IN_OCTAVE = [1, 3, 6, 8, 10];        // semitone offsets
+const BLACK_POSITIONS = { 1: 0, 3: 1, 6: 3, 8: 4, 10: 5 }; // white key index to right of black
+
+// MIDI 21 = A0, MIDI 108 = C8
+const MIDI_START = 21;
+const MIDI_END = 108;
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+function noteName(midi) {
+  const oct = Math.floor(midi / 12) - 1;
+  return NOTE_NAMES[midi % 12] + oct;
+}
+
+function isBlack(midi) {
+  return [1,3,6,8,10].includes(midi % 12);
+}
+
+// Build key list
+const keys = [];
+for (let m = MIDI_START; m <= MIDI_END; m++) {
+  keys.push({ midi: m, black: isBlack(m) });
+}
+
+// ── RENDER KEYBOARD ──
+let whiteXMap = {};
+
+function buildKeyboard() {
+  const wrapper = document.getElementById('keyboard-wrapper');
+  const kb = document.getElementById('keyboard');
+  const wrapH = wrapper.clientHeight;
+
+  const WHITE_W = Math.max(36, Math.min(52, wrapH / 5));
+  const WHITE_H = wrapH;
+  const BLACK_W = WHITE_W * 0.58;
+  const BLACK_H = WHITE_H * 0.62;
+
+  // Count white keys
+  const whiteKeys = keys.filter(k => !k.black);
+  const totalWidth = whiteKeys.length * WHITE_W;
+
+  kb.style.width = totalWidth + 'px';
+  kb.style.height = WHITE_H + 'px';
+  kb.innerHTML = '';
+
+  let whiteX = 0;
+  let prevWhiteX = 0;
+
+  // Build a map of midi -> x position for white keys
+  whiteXMap = {};
+
+  keys.forEach(key => {
+    if (!key.black) {
+      whiteXMap[key.midi] = whiteX;
+      whiteX += WHITE_W;
+    }
+  });
+
+  // Render white keys first, then black on top
+  keys.forEach(key => {
+    if (key.black) return;
+    const el = document.createElement('div');
+    el.className = 'white-key';
+    el.style.left = whiteXMap[key.midi] + 'px';
+    el.style.width = WHITE_W + 'px';
+    el.style.height = WHITE_H + 'px';
+
+    const label = document.createElement('div');
+    label.className = 'key-label';
+    const name = noteName(key.midi);
+    if (name.startsWith('C')) label.textContent = name;
+    el.appendChild(label);
+
+    bindKey(el, key.midi);
+    kb.appendChild(el);
+  });
+
+  // Render black keys
+  keys.forEach(key => {
+    if (!key.black) return;
+    // Find white key to the left (midi - 1)
+    const leftWhiteMidi = key.midi - 1;
+    const leftX = whiteXMap[leftWhiteMidi];
+    if (leftX === undefined) return;
+
+    const el = document.createElement('div');
+    el.className = 'black-key';
+    el.style.left = (leftX + WHITE_W - BLACK_W / 2) + 'px';
+    el.style.width = BLACK_W + 'px';
+    el.style.height = BLACK_H + 'px';
+    el.style.top = '0';
+
+    bindKey(el, key.midi);
+    kb.appendChild(el);
+  });
+
+  // Scroll to current center octave
+  scrollToCenterOctave();
+  updateShiftUI();
+}
+
+// ── INPUT BINDING ──
+function bindKey(el, midi) {
+  // Touch
+  el.addEventListener('touchstart', e => {
+    e.preventDefault();
+    el.classList.add('pressed');
+    playNote(midi);
+  }, { passive: false });
+
+  el.addEventListener('touchend', e => {
+    e.preventDefault();
+    el.classList.remove('pressed');
+    stopNote(midi);
+  }, { passive: false });
+
+  el.addEventListener('touchcancel', e => {
+    el.classList.remove('pressed');
+    stopNote(midi);
+  });
+
+  // Mouse (desktop)
+  el.addEventListener('mousedown', e => {
+    e.preventDefault();
+    el.classList.add('pressed');
+    playNote(midi);
+  });
+
+  el.addEventListener('mouseup', e => {
+    el.classList.remove('pressed');
+    stopNote(midi);
+  });
+
+  el.addEventListener('mouseleave', e => {
+    if (el.classList.contains('pressed')) {
+      el.classList.remove('pressed');
+      stopNote(midi);
+    }
+  });
+}
+
+let currentOctave = 4; // center on C4
+const MIN_OCTAVE = 0;  // C0 (midi 12) — just below piano start
+const MAX_OCTAVE = 8;  // C8 (midi 108) — top of piano
+
+function shiftOctave(dir) {
+  const next = currentOctave + dir;
+  if (next < MIN_OCTAVE || next > MAX_OCTAVE) return;
+  currentOctave = next;
+  scrollToCenterOctave();
+  updateShiftUI();
+}
+
+function scrollToCenterOctave() {
+  const wrapper = document.getElementById('keyboard-wrapper');
+  // C of currentOctave: midi = (octave + 1) * 12
+  const targetMidi = (currentOctave + 1) * 12;
+  const clamped = Math.max(MIDI_START, Math.min(MIDI_END, targetMidi));
+  const x = whiteXMap[clamped];
+  if (x !== undefined) {
+    const WHITE_W = getWhiteW();
+    wrapper.scrollTo({ left: x - wrapper.clientWidth / 2 + WHITE_W / 2, behavior: 'smooth' });
+  }
+}
+
+function updateShiftUI() {
+  document.getElementById('octave-display').textContent = 'C' + currentOctave;
+  document.getElementById('btn-left').disabled = currentOctave <= MIN_OCTAVE;
+  document.getElementById('btn-right').disabled = currentOctave >= MAX_OCTAVE;
+}
+
+function getWhiteW() {
+  const wrapper = document.getElementById('keyboard-wrapper');
+  const wrapH = wrapper.clientHeight;
+  return Math.max(36, Math.min(52, wrapH / 5));
+}
+
+
+function setSound(type) {
+  currentSound = type;
+  document.getElementById('btn-grand').classList.toggle('active', type === 'grand');
+  document.getElementById('btn-piano').classList.toggle('active', type === 'piano');
+  if (type === 'grand') ensureGrand();
+}
+
+// ── VOLUME ──
+document.getElementById('volume').addEventListener('input', e => {
+  masterVolume = parseFloat(e.target.value);
+  if (grandGain) grandGain.gain.value = masterVolume;
+});
+
+// ── SCROLL HINT ──
+let hintShown = false;
+document.getElementById('keyboard-wrapper').addEventListener('scroll', () => {
+  if (!hintShown) {
+    hintShown = true;
+    document.getElementById('scroll-hint').classList.add('hidden');
+  }
+}, { once: true });
+
+setTimeout(() => {
+  document.getElementById('scroll-hint').classList.add('hidden');
+}, 4000);
+
+// ── INIT ──
+buildKeyboard();
+window.addEventListener('resize', buildKeyboard);
+
+// GRAND is the default voice — preload the samples right away (decoding works
+// while the audio context is still suspended; SYNTH covers any keys pressed meanwhile).
+ensureGrand();
+
+// Browsers require a user gesture before audio can play — resume both engines on
+// the first interaction anywhere.
+let audioResumed = false;
+function resumeAudio() {
+  if (audioResumed) return;
+  audioResumed = true;
+  getCtx();
+  if (typeof Tone !== 'undefined') Tone.start();
+}
+['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, resumeAudio, { once: true })
+);
+
+// ── PWA: register service worker for offline support ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
+  });
+}
+</script>
+</body>
+</html>
