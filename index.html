@@ -540,6 +540,9 @@ function midiToToneNote(midi) {
 }
 
 function playNote(midi) {
+  // Make sure the audio engine is running — the very first key press happens
+  // inside a user gesture, so this is the right moment to (re)resume.
+  resumeAudio();
   if (currentSound === 'grand' && grandLoaded) {
     grandSampler.triggerAttack(midiToToneNote(midi));
     return;
@@ -598,10 +601,17 @@ for (let m = MIDI_START; m <= MIDI_END; m++) {
 // ── RENDER KEYBOARD ──
 let whiteXMap = {};
 
+let lastBuiltHeight = 0;
 function buildKeyboard() {
   const wrapper = document.getElementById('keyboard-wrapper');
   const kb = document.getElementById('keyboard');
   const wrapH = wrapper.clientHeight;
+
+  // Bail if the layout isn't measured yet (height 0) or hasn't actually changed
+  // since the last build — prevents the intermittent "elongated keys" caused by
+  // sizing against a stale/unsettled height, and avoids needless rebuilds.
+  if (!wrapH || wrapH === lastBuiltHeight) return;
+  lastBuiltHeight = wrapH;
 
   const WHITE_W = Math.max(36, Math.min(52, wrapH / 5));
   const WHITE_H = wrapH;
@@ -777,23 +787,34 @@ setTimeout(() => {
 
 // ── INIT ──
 buildKeyboard();
-window.addEventListener('resize', buildKeyboard);
+// Rebuild whenever the keyboard area's real size changes — this fires with the
+// correct height once layout settles and again on orientation / toolbar changes,
+// fixing the intermittent mis-sized ("elongated") keys that a one-shot measure hit.
+if (typeof ResizeObserver !== 'undefined') {
+  let rebuildTimer = null;
+  const ro = new ResizeObserver(() => {
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(buildKeyboard, 100);
+  });
+  ro.observe(document.getElementById('keyboard-wrapper'));
+} else {
+  window.addEventListener('resize', buildKeyboard);
+}
 
 // GRAND is the default voice — preload the samples right away (decoding works
 // while the audio context is still suspended; SYNTH covers any keys pressed meanwhile).
 ensureGrand();
 
-// Browsers require a user gesture before audio can play — resume both engines on
-// the first interaction anywhere.
-let audioResumed = false;
+// Browsers require a user gesture before audio can play. Resume both engines on
+// any interaction (capture phase, so this runs before a key's own handler) and
+// again on every note — this re-resumes if the OS suspends audio after the app
+// is backgrounded, so the first key press always makes sound.
 function resumeAudio() {
-  if (audioResumed) return;
-  audioResumed = true;
-  getCtx();
-  if (typeof Tone !== 'undefined') Tone.start();
+  if (ctx && ctx.state === 'suspended') ctx.resume();
+  if (typeof Tone !== 'undefined' && Tone.context.state !== 'running') Tone.start();
 }
 ['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
-  document.addEventListener(ev, resumeAudio, { once: true })
+  document.addEventListener(ev, resumeAudio, { capture: true })
 );
 
 // ── PWA: register service worker for offline support ──
