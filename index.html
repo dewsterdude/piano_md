@@ -83,6 +83,19 @@
     opacity: 0.7;
   }
 
+  /* Slide-to-play toggle (same pill look as the sound toggle) */
+  #slide-toggle {
+    display: flex;
+    background: #111;
+    border-radius: 20px;
+    padding: 3px;
+    border: 1px solid #444;
+  }
+
+  /* While slide mode is on, dragging over keys should play them, not scroll. */
+  body.slide-mode .white-key,
+  body.slide-mode .black-key { touch-action: none; }
+
   /* GRAND button stacks its label + sample credit */
   #btn-grand {
     display: flex;
@@ -316,6 +329,9 @@
   <div id="sound-toggle">
     <button class="sound-btn active" id="btn-grand" onclick="setSound('grand')"><span id="grand-label">GRAND</span><span class="credit">by Salamander</span></button>
     <button class="sound-btn" id="btn-piano" onclick="setSound('piano')">SYNTH</button>
+  </div>
+  <div id="slide-toggle">
+    <button class="sound-btn" id="btn-slide" onclick="toggleSlide()">SLIDE</button>
   </div>
   <div id="vol-wrap">
     <label>VOL</label>
@@ -644,6 +660,7 @@ function buildKeyboard() {
     if (key.black) return;
     const el = document.createElement('div');
     el.className = 'white-key';
+    el.dataset.midi = key.midi;
     el.style.left = whiteXMap[key.midi] + 'px';
     el.style.width = WHITE_W + 'px';
     el.style.height = WHITE_H + 'px';
@@ -654,7 +671,6 @@ function buildKeyboard() {
     if (name.startsWith('C')) label.textContent = name;
     el.appendChild(label);
 
-    bindKey(el, key.midi);
     kb.appendChild(el);
   });
 
@@ -668,12 +684,12 @@ function buildKeyboard() {
 
     const el = document.createElement('div');
     el.className = 'black-key';
+    el.dataset.midi = key.midi;
     el.style.left = (leftX + WHITE_W - BLACK_W / 2) + 'px';
     el.style.width = BLACK_W + 'px';
     el.style.height = BLACK_H + 'px';
     el.style.top = '0';
 
-    bindKey(el, key.midi);
     kb.appendChild(el);
   });
 
@@ -682,44 +698,62 @@ function buildKeyboard() {
   updateShiftUI();
 }
 
-// ── INPUT BINDING ──
-function bindKey(el, midi) {
-  // Touch
-  el.addEventListener('touchstart', e => {
-    e.preventDefault();
-    el.classList.add('pressed');
-    playNote(midi);
-  }, { passive: false });
+// ── INPUT (pointer-based; tap, hold, and slide-to-play) ──
+// One unified path for touch + mouse, delegated on the keyboard container so it
+// survives rebuilds and tracks each finger independently (chords work).
+// SLIDE on: dragging a pointer across keys plays whatever it's over.
+// SLIDE off: a key plays on press and releases on lift (classic behavior).
+let slideMode = localStorage.getItem('pianoSlide') === '1';
+const pointerNotes = {}; // pointerId -> midi currently sounding for that pointer
 
-  el.addEventListener('touchend', e => {
-    e.preventDefault();
-    el.classList.remove('pressed');
-    stopNote(midi);
-  }, { passive: false });
+function keyMidiAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const k = el && el.closest('.white-key, .black-key');
+  return k ? parseInt(k.dataset.midi, 10) : null;
+}
 
-  el.addEventListener('touchcancel', e => {
-    el.classList.remove('pressed');
-    stopNote(midi);
-  });
+function setPressed(midi, on) {
+  const el = kbEl.querySelector('[data-midi="' + midi + '"]');
+  if (el) el.classList.toggle('pressed', on);
+}
 
-  // Mouse (desktop)
-  el.addEventListener('mousedown', e => {
-    e.preventDefault();
-    el.classList.add('pressed');
-    playNote(midi);
-  });
+// Move a pointer onto a (possibly null) key: release whatever it held, sound the
+// new note. No-op when it's already on that key — so held notes don't retrigger.
+function pointerTo(pointerId, midi) {
+  const cur = pointerNotes[pointerId];
+  if (cur === midi) return;
+  if (cur != null) { stopNote(cur); setPressed(cur, false); }
+  if (midi != null) { playNote(midi); setPressed(midi, true); pointerNotes[pointerId] = midi; }
+  else delete pointerNotes[pointerId];
+}
 
-  el.addEventListener('mouseup', e => {
-    el.classList.remove('pressed');
-    stopNote(midi);
-  });
+function endPointer(pointerId) {
+  if (!(pointerId in pointerNotes)) return;
+  const m = pointerNotes[pointerId];
+  stopNote(m); setPressed(m, false);
+  delete pointerNotes[pointerId];
+}
 
-  el.addEventListener('mouseleave', e => {
-    if (el.classList.contains('pressed')) {
-      el.classList.remove('pressed');
-      stopNote(midi);
-    }
-  });
+const kbEl = document.getElementById('keyboard');
+kbEl.addEventListener('pointerdown', e => {
+  const midi = keyMidiAt(e.clientX, e.clientY);
+  if (midi == null) return;
+  if (slideMode) e.preventDefault();
+  pointerTo(e.pointerId, midi);
+});
+kbEl.addEventListener('pointermove', e => {
+  if (!slideMode || !(e.pointerId in pointerNotes)) return;
+  pointerTo(e.pointerId, keyMidiAt(e.clientX, e.clientY));
+});
+// End on window so a release outside the keyboard still stops the note.
+window.addEventListener('pointerup',     e => endPointer(e.pointerId));
+window.addEventListener('pointercancel', e => endPointer(e.pointerId));
+
+function toggleSlide() { slideMode = !slideMode; applySlideMode(); }
+function applySlideMode() {
+  document.body.classList.toggle('slide-mode', slideMode);
+  document.getElementById('btn-slide').classList.toggle('active', slideMode);
+  localStorage.setItem('pianoSlide', slideMode ? '1' : '0');
 }
 
 let currentOctave = 4; // center on C4
@@ -786,6 +820,7 @@ setTimeout(() => {
 }, 4000);
 
 // ── INIT ──
+applySlideMode(); // reflect stored SLIDE preference
 buildKeyboard();
 // Rebuild whenever the keyboard area's real size changes — this fires with the
 // correct height once layout settles and again on orientation / toolbar changes,
