@@ -171,11 +171,12 @@
   }
 
   /* ── KEYBOARD WRAPPER ── */
+  /* overflow-x is hidden (not auto): the user can't drag-scroll the board, but
+     the arrow buttons still move it via programmatic scrollLeft/scrollTo. */
   #keyboard-wrapper {
     flex: 1;
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
     position: relative;
     background: #111;
