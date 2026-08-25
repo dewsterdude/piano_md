@@ -114,6 +114,19 @@
     margin-top: 1px;
   }
 
+  /* MIDI input indicator — stays hidden unless a device is actually connected,
+     so it never shows up on iOS, where Web MIDI is unavailable. */
+  #midi-status {
+    padding: 4px 10px;
+    border-radius: 16px;
+    border: 1px solid #c8a96e;
+    color: #c8a96e;
+    font-size: 10px;
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+  #midi-status[hidden] { display: none; }
+
   /* Octave shifter */
   #octave-shifter {
     display: flex;
@@ -314,6 +327,7 @@
   <div id="slide-toggle">
     <button class="sound-btn" id="btn-slide" onclick="toggleSlide()">SLIDE</button>
   </div>
+  <div id="midi-status" hidden>MIDI</div>
   <div id="vol-wrap">
     <label>VOL</label>
     <input type="range" id="volume" min="0" max="1" step="0.05" value="0.7">
@@ -382,10 +396,10 @@ function getReverbNode() {
 }
 
 // ── PIANO SYNTH ── (additive harmonics + inharmonicity + hammer noise + reverb)
-function playPiano(midi) {
+function playPiano(midi, velocity = 1) {
   const ac   = getCtx();
   const freq = midiToFreq(midi);
-  const vol  = masterVolume;
+  const vol  = masterVolume * velocity;
   const now  = ac.currentTime;
 
   // 0=low A0, 1=high C8
@@ -534,17 +548,19 @@ function midiToToneNote(midi) {
   return NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1);
 }
 
-function playNote(midi) {
+// velocity is 0..1; touch input has no pressure to report so it defaults to 1,
+// leaving the on-screen keyboard sounding exactly as it did before.
+function playNote(midi, velocity = 1) {
   // Make sure the audio engine is running — the very first key press happens
   // inside a user gesture, so this is the right moment to (re)resume.
   resumeAudio();
   if (currentSound === 'grand' && grandLoaded) {
-    grandSampler.triggerAttack(midiToToneNote(midi));
+    grandSampler.triggerAttack(midiToToneNote(midi), Tone.now(), velocity);
     return;
   }
   // SYNTH voice — also used as fallback while GRAND samples are still loading
   stopNote(midi);
-  activeNotes[midi] = playPiano(midi);
+  activeNotes[midi] = playPiano(midi, velocity);
 }
 
 function stopNote(midi) {
@@ -841,6 +857,61 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') resumeAudio();
 });
 window.addEventListener('focus', resumeAudio);
+
+// ── MIDI INPUT ── (Web MIDI API)
+// No-op on iOS/iPadOS: every browser there is required to use WebKit, which does
+// not ship Web MIDI, so navigator.requestMIDIAccess is simply absent and nothing
+// below runs. Works on desktop Chrome/Edge/Firefox and Chrome for Android.
+const midiHeld = new Set();
+
+function updateMidiStatus(count) {
+  const el = document.getElementById('midi-status');
+  if (!el) return;
+  el.hidden = count === 0;
+  el.textContent = count > 1 ? 'MIDI \u00d7' + count : 'MIDI';
+}
+
+function midiNoteOn(midi, velocity) {
+  if (midiHeld.has(midi)) midiNoteOff(midi); // retrigger a already-sounding note
+  midiHeld.add(midi);
+  playNote(midi, velocity);
+  setPressed(midi, true);
+}
+
+function midiNoteOff(midi) {
+  if (!midiHeld.delete(midi)) return;
+  stopNote(midi);
+  setPressed(midi, false);
+}
+
+function midiAllNotesOff() { [...midiHeld].forEach(midiNoteOff); }
+
+function handleMidiMessage(e) {
+  const [status, data1, data2] = e.data;
+  const cmd = status & 0xf0;           // strip the channel — accept all 16
+  if (cmd === 0x90 && data2 > 0) {
+    midiNoteOn(data1, data2 / 127);
+  } else if (cmd === 0x80 || (cmd === 0x90 && data2 === 0)) {
+    midiNoteOff(data1);                // note-on with velocity 0 means note-off
+  } else if (cmd === 0xb0 && (data1 === 120 || data1 === 123)) {
+    midiAllNotesOff();                 // All Sound Off / All Notes Off
+  }
+}
+
+function bindMidiInputs(access) {
+  let count = 0;
+  access.inputs.forEach(input => { input.onmidimessage = handleMidiMessage; count++; });
+  updateMidiStatus(count);
+}
+
+if (navigator.requestMIDIAccess) {
+  navigator.requestMIDIAccess({ sysex: false }).then(access => {
+    bindMidiInputs(access);
+    // Re-bind on hot-plug. Release everything first: a device unplugged mid-note
+    // never sends its note-off, which would leave that note sounding forever.
+    access.onstatechange = () => { midiAllNotesOff(); bindMidiInputs(access); };
+  }).catch(err => console.warn('MIDI unavailable:', err));
+}
 
 // ── PWA: register service worker for offline support ──
 if ('serviceWorker' in navigator) {
