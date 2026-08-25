@@ -339,7 +339,7 @@
 let ctx = null;
 function getCtx() {
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-  if (ctx.state === 'suspended') ctx.resume();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
   return ctx;
 }
 
@@ -810,13 +810,37 @@ ensureGrand();
 // any interaction (capture phase, so this runs before a key's own handler) and
 // again on every note — this re-resumes if the OS suspends audio after the app
 // is backgrounded, so the first key press always makes sound.
-function resumeAudio() {
-  if (ctx && ctx.state === 'suspended') ctx.resume();
-  if (typeof Tone !== 'undefined' && Tone.context.state !== 'running') Tone.start();
+// iOS runs Web Audio in the "ambient" audio session, which the hardware ringer /
+// silent switch mutes — so the piano goes silent with no error and no code change.
+// Asking for "playback" (Safari 16.4+) makes it audible regardless of that switch.
+function claimPlaybackSession() {
+  try {
+    if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+      navigator.audioSession.type = 'playback';
+    }
+  } catch (err) { /* not supported — nothing to fall back to */ }
 }
+
+function resumeAudio() {
+  claimPlaybackSession();
+  // Resume on ANY non-running state, not just 'suspended': WebKit adds a
+  // non-standard 'interrupted' state (phone call, Siri, another audio app, or a
+  // backgrounded PWA) that a 'suspended'-only check leaves stuck silent forever.
+  if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+  if (typeof Tone !== 'undefined' && Tone.context.state !== 'running') {
+    Promise.resolve(Tone.start()).catch(() => {});
+  }
+}
+claimPlaybackSession();
 ['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
   document.addEventListener(ev, resumeAudio, { capture: true })
 );
+// An installed PWA is resumed from the background rather than reloaded, so the
+// interruption outlives any page load — re-resume when it comes back to the front.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') resumeAudio();
+});
+window.addEventListener('focus', resumeAudio);
 
 // ── PWA: register service worker for offline support ──
 if ('serviceWorker' in navigator) {
